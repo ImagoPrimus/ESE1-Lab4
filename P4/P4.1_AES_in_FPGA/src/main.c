@@ -96,8 +96,14 @@ int main(void) {
 
     printf("\nTesting AES256\n");
 
+    // Zeitmessung starten
+    clock_gettime(CLOCK_MONOTONIC, &time_start);
+
     AES_FPGA_encrypt_buffer(key, iv, enc_a, text_length);
     AES_FPGA_decrypt_buffer(key, iv, dec_a, text_length);
+
+    // Zeitmessung stoppen
+    clock_gettime(CLOCK_MONOTONIC, &time_stop);
 
     printf("\n");
     printf("Input:  "); print_hex(dec_t, text_length);

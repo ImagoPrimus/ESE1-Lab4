@@ -56,6 +56,7 @@
 
 #define KEY_SIZE				(32)
 #define IV_SIZE					(16)
+#define BLOCK_SIZE				(16)
 
 #define DATA_BUS_SIZE_IN_BITS	(32)
 #define CHAR_SIZE_IN_BITS		(8)
@@ -102,6 +103,9 @@ static void AES_FPGA_xcrypt_buffer(int enc, const uint8_t* key, const uint8_t* i
 	uint32_t *buf_word = (uint32_t *)(buf);
 	size_t length_word = length >> 2;
 
+	// Calculate number of 16-byte blocks
+	size_t num_blocks = length / BLOCK_SIZE;
+
 	// Load the key
 	for (uint32_t i = 0; i < KEY_SIZE/DATA_BUS_SIZE; i++) {
 		aes_cbc_reg[AES_KEY_REG(i)] = key_word[i];
@@ -114,9 +118,15 @@ static void AES_FPGA_xcrypt_buffer(int enc, const uint8_t* key, const uint8_t* i
 	// register is write-only, can't read and modify!
 	// STUDENTS TASK
 
+	aes_cbc_reg[AES_CONFIG_REG] = (AES_256_BIT_KEY << CONFIG_KEYLEN_BIT) | (enc << CONFIG_ENCDEC_BIT);
 
 	// initialize key expansion
-	// STUDENTS TASK
+	aes_cbc_reg[AES_CTRL_REG] = (1 << CTRL_INIT_BIT);
+
+	// wait for ready flag (key expansion done)
+	while (!(aes_cbc_reg[AES_STATUS_REG] & (1 << STATUS_READY_BIT))) {
+		// warten... 
+	}
 
 
 	// Write the plaintext (or ciphertext) block to the block registers
@@ -124,19 +134,42 @@ static void AES_FPGA_xcrypt_buffer(int enc, const uint8_t* key, const uint8_t* i
 		printf("FAILED text too long: %li\n", length);
 		length = 16;
 	}
-	// STUDENTS TASK
+	for (uint32_t i = 0; i < length_word; i++) {
+		aes_cbc_reg[AES_BLOCK_REG(i)] = buf_word[i];
+	}
 
 	// Write the IV to the IV registers
-	// STUDENTS TASK
+	for (uint32_t i = 0; i < IV_SIZE/DATA_BUS_SIZE; i++) {
+		aes_cbc_reg[AES_IV_REG(i)] = iv_word[i];
+	}
 
-	// Start block processing
-	// STUDENTS TASK
+	// Schleife über alle 16-Byte-Blöcke
+	for (size_t block = 0; block < num_blocks; block++) {
+		
+		// Pointer auf den aktuellen Block (in 32-bit Worten)
+		uint32_t *current_block = &buf_word[block * (BLOCK_SIZE / DATA_BUS_SIZE)];
 
-	// wait for valid flag
-	// STUDENTS TASK
+		// Write the plaintext (or ciphertext) block to the block registers
+		for (uint32_t i = 0; i < BLOCK_SIZE/DATA_BUS_SIZE; i++) {
+			aes_cbc_reg[AES_BLOCK_REG(i)] = current_block[i];
+		}
 
-	//Read out the ciphertext block from the result registers
-	// STUDENTS TASK
+		// Start block processing
+		aes_cbc_reg[AES_CTRL_REG] = (1 << CTRL_NEXT_BIT);
+
+		// wait for valid flag
+		while (!(aes_cbc_reg[AES_STATUS_REG] & (1 << STATUS_VALID_BIT))) {
+			// warten... 
+		}
+
+		// Read out the ciphertext block from the result registers
+		for (uint32_t i = 0; i < BLOCK_SIZE/DATA_BUS_SIZE; i++) {
+			current_block[i] = aes_cbc_reg[AES_RESULT_REG(i)];
+		}
+	}
+
+	// Unmap memory
+	munmap(virtual_aes_base, sysconf(_SC_PAGE_SIZE));
 }
 
 /****************************************************************************************
